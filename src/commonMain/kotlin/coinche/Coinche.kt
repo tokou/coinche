@@ -1,5 +1,7 @@
 package coinche
 
+import kotlin.random.Random
+
 enum class Suit(private val str: String) {
     SPADE("♠"),
     HEART("♥"),
@@ -46,7 +48,9 @@ operator fun Position.minus(offset: Int): Position = plus(-offset)
 
 typealias BidScore = Int
 
-sealed class Bid {
+sealed class BiddingStep
+object Pass : BiddingStep()
+sealed class Bid : BiddingStep() {
     abstract val suit: Suit
     abstract val position: Position
 
@@ -120,16 +124,43 @@ data class Game(
 
 fun Game.isNotDone(): Boolean = !isDone()
 
+val biddingStrategy = Position.values().associate { position ->
+    position to { history: List<Pair<Position, BiddingStep>> ->
+        val random = Random.nextInt(16)
+        if (random < 8) Pass else {
+            val highestBid = history.findLast { it.second is Bid }?.second as Bid?
+            if (highestBid == null) Bid.Contract(position, Suit.values()[Random.nextInt(Suit.values().size)], random * 10)
+            else when (highestBid) {
+                is Bid.Contract -> if (random * 10 > highestBid.contract) Bid.Contract(position, Suit.values()[Random.nextInt(Suit.values().size)], random * 10) else Pass
+                else -> Pass
+            }
+        }
+    }
+}
+
 fun play() {
 
     val firstToPlay = Position.NORTH
     var game = Game(firstToPlay)
 
     while (game.isNotDone()) {
-        val freshPlayers = drawCards()
-        val winningBid = doBidding()
+        var drawnCards: Map<Position, Player>
+        var tentativeBid: BiddingStep
+        var roundStarter = game.firstToPlay
+        do {
+            drawnCards = drawCards()
+            tentativeBid = doBidding(roundStarter, biddingStrategy)
+            if (tentativeBid == Pass) roundStarter += 1
+            println("Done bidding, tentative bid: $tentativeBid")
+        } while (tentativeBid == Pass)
+
+        val freshPlayers = drawnCards
+        val winningBid = tentativeBid as Bid
+        println("Winning bid : $winningBid")
+        println()
+
         val belotePosition = freshPlayers.findBelote(winningBid.suit)
-        var round = Round(emptyList(), freshPlayers, game.firstToPlay, winningBid, belotePosition)
+        var round = Round(emptyList(), freshPlayers, roundStarter, winningBid, belotePosition)
 
         while (round.isNotDone()) {
             var trick = Trick(emptyList(), round.players, round.startingPosition)
@@ -229,7 +260,21 @@ fun findWinningCard(trick: Trick, trumpSuit: Suit): Card {
     return trick.cards.filter { it.suit == playedSuit }.sortedByDescending { it.rank.value }.first()
 }
 
-private fun doBidding(): Bid = Bid.Contract(Position.NORTH, Suit.SPADE, 100)
+private fun doBidding(
+    startingPosition: Position,
+    deciders: Map<Position, (decisions: List<Pair<Position, BiddingStep>>) -> BiddingStep>
+): BiddingStep {
+    val steps = mutableListOf<Pair<Position, BiddingStep>>()
+    var speaker = startingPosition
+    do {
+        val decision = speaker to deciders[speaker]!!(steps)
+        if (decision is Bid) require(decision.position == speaker)
+        println("$speaker bids ${decision.second}")
+        steps.add(decision)
+        speaker += 1
+    } while (steps.size < 4 || steps.takeLast(3).map { it.second }.any { it != Pass })
+    return steps.dropLast(3).last().second
+}
 
 fun advanceTrick(trick: Trick, trumpSuit: Suit, play: (Trick) -> Card): Trick {
     if (trick.isDone()) return trick
