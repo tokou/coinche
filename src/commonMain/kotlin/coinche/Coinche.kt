@@ -35,8 +35,12 @@ enum class Position(private val str: String) {
     override fun toString(): String = str
 }
 
-operator fun Position.plus(offset: Int): Position =
-    Position.values()[(this.ordinal + offset) % Position.values().size]
+operator fun Position.plus(offset: Int): Position {
+    val positions = Position.values()
+    val size = positions.size
+    val index = this.ordinal + offset
+    return positions[(index % size + size) % size] // ensure we stay in [0, size)
+}
 
 operator fun Position.minus(offset: Int): Position = plus(-offset)
 
@@ -69,31 +73,68 @@ data class Trick(
 
     fun isDone(): Boolean = cards.size == players.size
 
-    override fun toString(): String = "T$cards | $players"
+    override fun toString(): String = "T$cards | ${currentPosition - 1} played ${cards.lastOrNull() ?: ""}"
 }
 
 fun Trick.isNotDone(): Boolean = !isDone()
 
 data class Round(
-    val tricks: List<Trick>
-)
+    val tricks: List<Trick>,
+    val players: Map<Position, Player>,
+    val startingPosition: Position
+) {
+    fun isDone(): Boolean =
+        players.values.map { it.hand.size }.sum() == 0
+}
+
+fun Round.isNotDone(): Boolean = !isDone()
 
 data class Game(
     val rounds: List<Round>
 )
 
 fun play() {
-    val players = drawCards()
-    val winningBid = Bid(100, Suit.SPADE, Position.NORTH)
-    var trick = Trick(emptyList(), players, winningBid.position)
+
+    val freshPlayers = drawCards()
+
+    val winningBid = doBidding()
+
     val trumpSuit = winningBid.suit
-    while (trick.isNotDone()) {
-        trick = advanceTrick(trick, trumpSuit) {
-            findPlayableCards(trick, trumpSuit).first()
+    val dealersRight = Position.NORTH
+
+    var round = Round(emptyList(), freshPlayers, dealersRight)
+
+    while (round.isNotDone()) {
+        var trick = Trick(emptyList(), round.players, round.startingPosition)
+        while (trick.isNotDone()) {
+            trick = advanceTrick(trick, trumpSuit) {
+                findPlayableCards(trick, trumpSuit).first()
+            }
+            println(trick)
         }
-        println(trick)
+        val winningCard = findWinningCard(trick, trumpSuit)
+        val winnerPosition = trick.startingPosition + trick.cards.indexOf(winningCard)
+
+        round = round.copy(
+            tricks = round.tricks + trick,
+            players = trick.players,
+            startingPosition = winnerPosition
+        )
+        println()
+        println("$winnerPosition won the trick! ${round.tricks.size} played.")
+        println()
     }
 }
+
+fun findWinningCard(trick: Trick, trumpSuit: Suit): Card {
+    require(trick.isDone())
+    val trumpCards = trick.cards.filter { it.suit == trumpSuit }.sortedByDescending { it.rank.trumpValue }
+    if (trumpCards.isNotEmpty()) return trumpCards.first()
+    val playedSuit = trick.cards.first().suit
+    return trick.cards.filter { it.suit == playedSuit }.sortedByDescending { it.rank.value }.first()
+}
+
+private fun doBidding(): Bid = Bid(100, Suit.SPADE, Position.NORTH)
 
 fun advanceTrick(trick: Trick, trumpSuit: Suit, play: (Trick) -> Card): Trick {
     if (trick.isDone()) return trick
