@@ -2,21 +2,31 @@ package coinche
 
 import kotlin.random.Random
 
-val biddingStrategy = Position.values().associate { position ->
-    position to { history: List<Pair<Position, BiddingStep>> ->
-        val random = Random.nextInt(16)
-        if (random < 8) Pass else {
-            val highestBid = history.findLast { it.second is Bid }?.second as Bid?
-            if (highestBid == null) Bid.Contract(position, Suit.values()[Random.nextInt(Suit.values().size)], random * 10)
-            else when (highestBid) {
-                is Bid.Contract -> if (random * 10 > highestBid.contract) Bid.Contract(position, Suit.values()[Random.nextInt(Suit.values().size)], random * 10) else Pass
-                else -> Pass
-            }
-        }
+
+fun makeBidForPosition(position: Position): suspend (history: List<Pair<Position, BiddingStep>>) -> BiddingStep =
+    { history -> makeBid(position, history) }
+
+suspend fun makeBid(position: Position, history: List<Pair<Position, BiddingStep>>): BiddingStep {
+    val random = Random.nextInt(16)
+    if (random < 8) return Pass
+    val highestBid = history.findLast { it.second is Bid }?.second as Bid?
+    val contract = Bid.Contract(position, Suit.values()[Random.nextInt(Suit.values().size)], random * 10)
+    if (highestBid == null) return contract
+    return when (highestBid) {
+        is Bid.Contract -> if (random * 10 > highestBid.contract) contract else Pass
+        else -> Pass
     }
 }
 
-fun play() {
+val biddingStrategy = Position.values().associate { position ->
+    position to makeBidForPosition(position)
+}
+
+val playingStrategy =  { game: Game -> suspend {
+    findPlayableCards(game.rounds.last().tricks.last(), game.rounds.last().bid.suit).first()
+} }
+
+suspend fun play() {
 
     val firstToPlay = Position.NORTH
     var game = Game(firstToPlay)
@@ -38,26 +48,27 @@ fun play() {
         println()
 
         val belotePosition = freshPlayers.findBelote(winningBid.suit)
-        var round = Round(emptyList(), freshPlayers, roundStarter, winningBid, belotePosition)
+        val round = Round(emptyList(), freshPlayers, roundStarter, winningBid, belotePosition)
+        game = game.copy(rounds = game.rounds + round)
 
         while (round.isNotDone()) {
-            var trick = Trick(emptyList(), round.players, round.startingPosition)
+            val trick = Trick(emptyList(), round.players, round.startingPosition)
+            game = game.copy(rounds = game.rounds.dropLast(1) + round.copy(tricks = round.tricks + trick))
             while (trick.isNotDone()) {
-                trick = advanceTrick(trick, round.bid.suit) {
-                    findPlayableCards(trick, round.bid.suit).first()
-                }
+                val nextTrick = advanceTrick(trick, round.bid.suit, playingStrategy(game))
+                game = game.copy(rounds = game.rounds.dropLast(1) + round.copy(tricks = round.tricks.dropLast(1) + nextTrick))
                 println(trick)
             }
             val winningCard = findWinningCard(trick, round.bid.suit)
             val winnerPosition = trick.startingPosition + trick.cards.indexOf(winningCard)
             val isLastTrick = trick.players.areEmptyHanded()
 
-            round = round.copy(
+            game = game.copy(rounds = game.rounds.dropLast(1) + round.copy(
                 tricks = round.tricks + trick,
                 players = trick.players,
                 startingPosition = winnerPosition,
                 currentPoints = round.currentPoints + computeTrickPoints(trick, round.bid.suit, winnerPosition, isLastTrick)
-            )
+            ))
             println()
             println("$winnerPosition won the trick! ${round.tricks.size} played. Points: ${round.currentPoints}.")
             println()
@@ -141,9 +152,9 @@ fun findWinningCard(trick: Trick, trumpSuit: Suit): Card {
     return trick.cards.filter { it.suit == playedSuit }.sortedByDescending { it.rank.value }.first()
 }
 
-private fun doBidding(
+private suspend fun doBidding(
     startingPosition: Position,
-    deciders: Map<Position, (decisions: List<Pair<Position, BiddingStep>>) -> BiddingStep>
+    deciders: Map<Position, suspend (decisions: List<Pair<Position, BiddingStep>>) -> BiddingStep>
 ): BiddingStep {
     val steps = mutableListOf<Pair<Position, BiddingStep>>()
     var speaker = startingPosition
@@ -157,11 +168,11 @@ private fun doBidding(
     return steps.dropLast(3).last().second
 }
 
-fun advanceTrick(trick: Trick, trumpSuit: Suit, play: (Trick) -> Card): Trick {
+suspend fun advanceTrick(trick: Trick, trumpSuit: Suit, play: suspend () -> Card): Trick {
     if (trick.isDone()) return trick
     val currentPlayer = trick.currentPlayer!! // Contract
     val currentPosition = trick.startingPosition + trick.cards.size
-    val card = play(trick)
+    val card = play()
     val validCards = findPlayableCards(trick, trumpSuit)
     require(validCards.contains(card)) { "Invalid move playing $card. Valid cards are $validCards." }
     val newHand = currentPlayer.hand - card
