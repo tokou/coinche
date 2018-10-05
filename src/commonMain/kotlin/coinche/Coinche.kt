@@ -50,13 +50,18 @@ typealias BidScore = Int
 
 sealed class BiddingStep
 object Pass : BiddingStep()
-sealed class Bid : BiddingStep() {
+sealed class Bid(val coincheStatus: CoincheStatus = CoincheStatus.NONE) : BiddingStep() {
     abstract val suit: Suit
     abstract val position: Position
 
     data class Contract(override val position: Position, override val suit: Suit, val contract: BidScore) : Bid()
     data class Capot(override val position: Position, override val suit: Suit) : Bid()
     data class Generale(override val position: Position, override val suit: Suit) : Bid()
+
+}
+
+enum class CoincheStatus {
+    NONE, COINCHE, SURCOINCHE
 }
 
 data class Card(
@@ -217,12 +222,22 @@ fun computeRoundScore(round: Round): Score {
         is Bid.Capot -> round.findWinners().all { it == bid.position || it == bid.position + 2 }
         is Bid.Generale -> round.findWinners().all { it == bid.position }
     }
-    val attackerScore = if (bidSuccess) when (bid) {
+    val bidValue = when (bid) {
         is Bid.Contract -> bid.contract
         is Bid.Capot -> 250
         is Bid.Generale -> 500
-    } else 0
-    val defenderScore = if (bidSuccess) 0 else 160
+    }
+    val baseAttackerScore = if (bidSuccess) bidValue else 0
+    val attackerScore = baseAttackerScore * when (bid.coincheStatus) {
+        CoincheStatus.NONE -> 1
+        CoincheStatus.COINCHE -> 2
+        CoincheStatus.SURCOINCHE -> 4
+    }
+    val defenderScore = if (bidSuccess) 0 else when (bid.coincheStatus) {
+        CoincheStatus.NONE -> 160
+        CoincheStatus.COINCHE -> 2 * bidValue
+        CoincheStatus.SURCOINCHE -> 4 * bidValue
+    }
     val contractScore = when (bid.position) {
         Position.NORTH, Position.SOUTH -> attackerScore to defenderScore
         Position.EAST, Position.WEST -> defenderScore to attackerScore
