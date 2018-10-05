@@ -81,50 +81,92 @@ fun Trick.isNotDone(): Boolean = !isDone()
 data class Round(
     val tricks: List<Trick>,
     val players: Map<Position, Player>,
-    val startingPosition: Position
+    val startingPosition: Position,
+    val bid: Bid,
+    val currentPoints: Score = 0 to 0
 ) {
-    fun isDone(): Boolean =
-        players.values.map { it.hand.size }.sum() == 0
+    val score: Score = 0 to 0
+
+    fun isDone(): Boolean = players.areEmptyHanded()
 }
+
+fun Map<Position, Player>.areEmptyHanded(): Boolean = values.map { it.hand.size }.sum() == 0
 
 fun Round.isNotDone(): Boolean = !isDone()
 
+typealias Score = Pair<Int, Int>
+
 data class Game(
-    val rounds: List<Round>
-)
+    val firstToPlay: Position,
+    val rounds: List<Round> = emptyList(),
+    val score: Score = 0 to 0,
+    val winningScore: Int = 1001
+) {
+    fun isDone(): Boolean = score.first >= winningScore || score.second >= winningScore
+}
+
+fun Game.isNotDone(): Boolean = !isDone()
 
 fun play() {
 
-    val freshPlayers = drawCards()
+    val firstToPlay = Position.NORTH
+    var game = Game(firstToPlay)
 
-    val winningBid = doBidding()
+    while (game.isNotDone()) {
+        val freshPlayers = drawCards()
+        val winningBid = doBidding()
+        var round = Round(emptyList(), freshPlayers, game.firstToPlay, winningBid)
 
-    val trumpSuit = winningBid.suit
-    val dealersRight = Position.NORTH
-
-    var round = Round(emptyList(), freshPlayers, dealersRight)
-
-    while (round.isNotDone()) {
-        var trick = Trick(emptyList(), round.players, round.startingPosition)
-        while (trick.isNotDone()) {
-            trick = advanceTrick(trick, trumpSuit) {
-                findPlayableCards(trick, trumpSuit).first()
+        while (round.isNotDone()) {
+            var trick = Trick(emptyList(), round.players, round.startingPosition)
+            while (trick.isNotDone()) {
+                trick = advanceTrick(trick, round.bid.suit) {
+                    findPlayableCards(trick, round.bid.suit).first()
+                }
+                println(trick)
             }
-            println(trick)
-        }
-        val winningCard = findWinningCard(trick, trumpSuit)
-        val winnerPosition = trick.startingPosition + trick.cards.indexOf(winningCard)
+            val winningCard = findWinningCard(trick, round.bid.suit)
+            val winnerPosition = trick.startingPosition + trick.cards.indexOf(winningCard)
+            val isLastTrick = trick.players.areEmptyHanded()
 
-        round = round.copy(
-            tricks = round.tricks + trick,
-            players = trick.players,
-            startingPosition = winnerPosition
+            round = round.copy(
+                tricks = round.tricks + trick,
+                players = trick.players,
+                startingPosition = winnerPosition,
+                currentPoints = round.currentPoints + computeTrickPoints(trick, round.bid.suit, winnerPosition, isLastTrick)
+            )
+            println()
+            println("$winnerPosition won the trick! ${round.tricks.size} played. Score is ${round.currentPoints}.")
+            println()
+        }
+        require(round.currentPoints.first + round.currentPoints.second == 162)
+        game = game.copy(
+            rounds = game.rounds + round,
+            firstToPlay = game.firstToPlay + 1,
+            score = game.score + round.score
         )
-        println()
-        println("$winnerPosition won the trick! ${round.tricks.size} played.")
-        println()
+    }
+
+    println()
+    println("Game Over.")
+}
+
+fun computeTrickPoints(
+    trick: Trick,
+    trumpSuit: Suit,
+    winnerPosition: Position,
+    isLastTrick: Boolean
+): Score {
+    require(trick.isDone())
+    val points = trick.cards.map { if (it.suit == trumpSuit) it.rank.trumpValue else it.rank.value }.sum()
+    val total = points + if (isLastTrick) 10 else 0
+    return when (winnerPosition) {
+        Position.NORTH, Position.SOUTH -> total to 0
+        Position.EAST, Position.WEST -> 0 to total
     }
 }
+
+operator fun Score.plus(other: Score) = first + other.first to second + other.second
 
 fun findWinningCard(trick: Trick, trumpSuit: Suit): Card {
     require(trick.isDone())
