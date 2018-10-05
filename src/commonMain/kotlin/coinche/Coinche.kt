@@ -46,7 +46,14 @@ operator fun Position.minus(offset: Int): Position = plus(-offset)
 
 typealias BidScore = Int
 
-data class Bid(val contract: BidScore, val suit: Suit, val position: Position)
+sealed class Bid {
+    abstract val suit: Suit
+    abstract val position: Position
+
+    data class Contract(override val position: Position, override val suit: Suit, val contract: BidScore) : Bid()
+    data class Capot(override val position: Position, override val suit: Suit) : Bid()
+    data class Generale(override val position: Position, override val suit: Suit) : Bid()
+}
 
 data class Card(
     val rank: Rank,
@@ -174,8 +181,16 @@ fun computeRoundScore(round: Round): Score {
         Position.NORTH, Position.SOUTH -> points.first
         Position.EAST, Position.WEST -> points.second
     }
-    val bidSuccess = attackerPoints >= bid.contract
-    val attackerScore = if (bidSuccess) bid.contract else 0
+    val bidSuccess = when (bid) {
+        is Bid.Contract -> attackerPoints >= bid.contract
+        is Bid.Capot -> round.findWinners().all { it == bid.position || it == bid.position + 2 }
+        is Bid.Generale -> round.findWinners().all { it == bid.position }
+    }
+    val attackerScore = if (bidSuccess) when (bid) {
+        is Bid.Contract -> bid.contract
+        is Bid.Capot -> 250
+        is Bid.Generale -> 500
+    } else 0
     val defenderScore = if (bidSuccess) 0 else 160
     val contractScore = when (bid.position) {
         Position.NORTH, Position.SOUTH -> attackerScore to defenderScore
@@ -183,6 +198,11 @@ fun computeRoundScore(round: Round): Score {
     }
     return contractScore + belotePoints
 }
+
+fun Round.findWinners() = tricks.map {
+        val winningCard = findWinningCard(it, bid.suit)
+        it.startingPosition + it.cards.indexOf(winningCard)
+    }.distinct()
 
 fun computeTrickPoints(
     trick: Trick,
@@ -209,7 +229,7 @@ fun findWinningCard(trick: Trick, trumpSuit: Suit): Card {
     return trick.cards.filter { it.suit == playedSuit }.sortedByDescending { it.rank.value }.first()
 }
 
-private fun doBidding(): Bid = Bid(100, Suit.SPADE, Position.NORTH)
+private fun doBidding(): Bid = Bid.Contract(Position.NORTH, Suit.SPADE, 100)
 
 fun advanceTrick(trick: Trick, trumpSuit: Suit, play: (Trick) -> Card): Trick {
     if (trick.isDone()) return trick
