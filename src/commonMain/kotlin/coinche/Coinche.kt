@@ -46,7 +46,7 @@ operator fun Position.minus(offset: Int): Position = plus(-offset)
 
 typealias BidScore = Int
 
-data class Bid(val score: BidScore, val suit: Suit, val position: Position)
+data class Bid(val contract: BidScore, val suit: Suit, val position: Position)
 
 data class Card(
     val rank: Rank,
@@ -85,8 +85,6 @@ data class Round(
     val bid: Bid,
     val currentPoints: Score = 0 to 0
 ) {
-    val score: Score = 0 to 0
-
     fun isDone(): Boolean = players.areEmptyHanded()
 }
 
@@ -136,19 +134,40 @@ fun play() {
                 currentPoints = round.currentPoints + computeTrickPoints(trick, round.bid.suit, winnerPosition, isLastTrick)
             )
             println()
-            println("$winnerPosition won the trick! ${round.tricks.size} played. Score is ${round.currentPoints}.")
+            println("$winnerPosition won the trick! ${round.tricks.size} played. Points: ${round.currentPoints}.")
             println()
         }
         require(round.currentPoints.first + round.currentPoints.second == 162)
         game = game.copy(
             rounds = game.rounds + round,
             firstToPlay = game.firstToPlay + 1,
-            score = game.score + round.score
+            score = game.score + computeRoundScore(round)
         )
+        println()
+        println("Round done. Score is ${game.score}.")
     }
 
     println()
-    println("Game Over.")
+    println("Game Over. Score is ${game.score}.")
+}
+
+fun computeRoundScore(round: Round): Score {
+    // Missing : Belote, Rebelote
+    // Check also, other scoring rules
+    require(round.isDone())
+    val bid = round.bid
+    val points = round.currentPoints
+    val attackerPoints = when (bid.position) {
+        Position.NORTH, Position.SOUTH -> points.first
+        Position.EAST, Position.WEST -> points.second
+    }
+    val bidSuccess = attackerPoints >= bid.contract
+    val attackerScore = if (bidSuccess) bid.contract else 0
+    val defenderScore = if (bidSuccess) 0 else 160
+    return when (bid.position) {
+        Position.NORTH, Position.SOUTH -> attackerScore to defenderScore
+        Position.EAST, Position.WEST -> defenderScore to attackerScore
+    }
 }
 
 fun computeTrickPoints(
