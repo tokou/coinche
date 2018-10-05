@@ -283,7 +283,7 @@ private fun doBidding(
     var speaker = startingPosition
     do {
         val decision = speaker to deciders[speaker]!!(steps)
-        if (decision is Bid) require(decision.position == speaker)
+        if (decision is Bid && decision.coincheStatus == CoincheStatus.NONE) require(decision.position == speaker)
         println("$speaker bids ${decision.second}")
         steps.add(decision)
         speaker += 1
