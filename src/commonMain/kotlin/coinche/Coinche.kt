@@ -83,12 +83,20 @@ data class Round(
     val players: Map<Position, Player>,
     val startingPosition: Position,
     val bid: Bid,
+    val belotePosition: Position?,
     val currentPoints: Score = 0 to 0
 ) {
     fun isDone(): Boolean = players.areEmptyHanded()
 }
 
 fun Map<Position, Player>.areEmptyHanded(): Boolean = values.map { it.hand.size }.sum() == 0
+
+fun Map<Position, Player>.findBelote(trumpSuit: Suit): Position? = entries.find {
+        val hand = it.value.hand
+        val belote = Card(Rank.QUEEN, trumpSuit)
+        val rebelote = Card(Rank.KING, trumpSuit)
+        hand.contains(belote) && hand.contains(rebelote)
+    }?.key
 
 fun Round.isNotDone(): Boolean = !isDone()
 
@@ -113,7 +121,8 @@ fun play() {
     while (game.isNotDone()) {
         val freshPlayers = drawCards()
         val winningBid = doBidding()
-        var round = Round(emptyList(), freshPlayers, game.firstToPlay, winningBid)
+        val belotePosition = freshPlayers.findBelote(winningBid.suit)
+        var round = Round(emptyList(), freshPlayers, game.firstToPlay, winningBid, belotePosition)
 
         while (round.isNotDone()) {
             var trick = Trick(emptyList(), round.players, round.startingPosition)
@@ -156,7 +165,11 @@ fun computeRoundScore(round: Round): Score {
     // Check also, other scoring rules
     require(round.isDone())
     val bid = round.bid
-    val points = round.currentPoints
+    val belotePoints = round.belotePosition?.let { when (it) {
+        Position.NORTH, Position.SOUTH -> 20 to 0
+        Position.EAST, Position.WEST -> 0 to 20
+    } } ?: 0 to 0
+    val points = round.currentPoints + belotePoints
     val attackerPoints = when (bid.position) {
         Position.NORTH, Position.SOUTH -> points.first
         Position.EAST, Position.WEST -> points.second
@@ -164,10 +177,11 @@ fun computeRoundScore(round: Round): Score {
     val bidSuccess = attackerPoints >= bid.contract
     val attackerScore = if (bidSuccess) bid.contract else 0
     val defenderScore = if (bidSuccess) 0 else 160
-    return when (bid.position) {
+    val contractScore = when (bid.position) {
         Position.NORTH, Position.SOUTH -> attackerScore to defenderScore
         Position.EAST, Position.WEST -> defenderScore to attackerScore
     }
+    return contractScore + belotePoints
 }
 
 fun computeTrickPoints(
