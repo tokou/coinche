@@ -108,8 +108,7 @@ private suspend fun makeBids(game: Game): Triple<Map<Position, Player>, Bid, Pos
 }
 
 fun computeRoundScore(round: Round): Score {
-    // Missing : Belote, Rebelote
-    // Check also, other scoring rules
+    // Missing : other scoring rules (like point done + contract, steal belote)
     require(round.isDone())
     val bid = round.bid
     val belotePoints = round.belotePosition?.let { when (it) {
