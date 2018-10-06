@@ -4,7 +4,7 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlin.browser.window
 
-fun main() {
+fun start() {
     GlobalScope.launch { runGame() }
 }
 
