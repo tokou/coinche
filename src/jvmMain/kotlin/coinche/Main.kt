@@ -16,6 +16,14 @@ actual fun showGameState(state: GameState) {
             println("Game starting.")
             println()
         }
+        Update.NEW_BIDDING_STEP -> {
+            println("New bidding step: ${game.currentRound.biddingSteps.last()}")
+            println()
+        }
+        Update.END_BIDDING -> {
+            println("End of biddings: ${game.currentRound.biddingSteps}")
+            println()
+        }
         Update.NEW_ROUND -> {
             println("New round.")
             game.currentRound.players.forEach { p, h -> println("$p |$h") }

@@ -12,7 +12,9 @@ expect fun inputCard(playableCards: Set<Card>): Card
 suspend fun runGame() = coroutineScope {
     val states = Channel<Pair<Update, Game>>(Channel.UNLIMITED)
     val cards = Channel<Card>(Channel.UNLIMITED)
+
     launch { startGame(states, cards) }
+
     for (state in states) {
         showGameState(state)
         if (state.shouldPlay()) play(state.second, cards)

@@ -25,6 +25,8 @@ val biddingStrategy = Position.values().associate { position ->
 
 enum class Update {
     NEW_GAME,
+    NEW_BIDDING_STEP,
+    END_BIDDING,
     NEW_ROUND,
     NEW_TRICK,
     ADVANCE_TRICK,
@@ -55,11 +57,17 @@ private suspend fun playGame(
     state: SendChannel<GameState>,
     cards: ReceiveChannel<Card>
 ): Game {
-    val (freshPlayers, winningBid, roundStarter) = makeBids(initializedGame)
-
-    val belotePosition = freshPlayers.findBelote(winningBid.suit)
-    val round = Round(emptyList(), freshPlayers, roundStarter, winningBid, belotePosition)
+    val round = Round(emptyList(), drawCards(), initializedGame.firstToPlay, emptyList(), belotePosition = null)
     var game = initializedGame.addRound(round)
+
+    game = makeBids(game, state)
+    if (game.currentRound.isDone()) {
+        state.send(Update.END_ROUND to game)
+        return game
+    }
+
+    val belotePosition = game.currentRound.players.findBelote(game.currentRound.bid.suit)
+    game.updateCurrentRound(round.copy(belotePosition = belotePosition))
     state.send(Update.NEW_ROUND to game)
 
     while (game.currentRound.isNotDone()) {
@@ -73,6 +81,13 @@ private suspend fun playGame(
     game = game.addScore(roundScore).changeDealer()
     state.send(Update.END_ROUND to game)
     return game
+}
+
+private suspend fun makeBids(game: Game, state: SendChannel<GameState>): Game {
+    val deciders = Position.values().associate { it to makeBidForPosition(it) }
+    val biddedGame = doBidding(game, deciders, state)
+    state.send(GameState(Update.END_BIDDING, biddedGame))
+    return biddedGame
 }
 
 private suspend fun playRound(
@@ -115,20 +130,6 @@ private suspend fun updateGameAfterTrickIsDone(
     val updatedGame = game.updateCurrentRound(updatedRound)
     state.send(Update.END_TRICK to updatedGame)
     return updatedGame
-}
-
-private suspend fun makeBids(game: Game): Triple<Map<Position, Player>, Bid, Position> {
-    var drawnCards: Map<Position, Player>
-    var tentativeBid: BiddingStep
-    var biddingStarter = game.firstToPlay
-
-    do {
-        drawnCards = drawCards()
-        tentativeBid = doBidding(biddingStarter, biddingStrategy)
-        if (tentativeBid == Pass) biddingStarter += 1
-    } while (tentativeBid == Pass)
-
-    return Triple(drawnCards, tentativeBid as Bid, biddingStarter)
 }
 
 fun computeRoundScore(round: Round): Score {
@@ -189,25 +190,43 @@ fun computeTrickPoints(
 
 fun findWinningCard(trick: Trick, trumpSuit: Suit): Card {
     require(trick.isDone())
+
     val trumpCards = trick.cards.filter { it.suit == trumpSuit }.sortedByDescending { it.rank.trumpValue }
     if (trumpCards.isNotEmpty()) return trumpCards.first()
+
     val playedSuit = trick.cards.first().suit
     return trick.cards.filter { it.suit == playedSuit }.sortedByDescending { it.rank.value }.first()
 }
 
 private suspend fun doBidding(
-    startingPosition: Position,
-    deciders: Map<Position, suspend (decisions: List<Pair<Position, BiddingStep>>) -> BiddingStep>
-): BiddingStep {
+    game: Game,
+    deciders: Map<Position, suspend (decisions: List<Pair<Position, BiddingStep>>) -> BiddingStep>,
+    state: SendChannel<GameState>
+): Game {
+    var biddingGame = game
     val steps = mutableListOf<Pair<Position, BiddingStep>>()
-    var speaker = startingPosition
+    var speaker = biddingGame.firstToPlay
+
     do {
         val decision = speaker to deciders[speaker]!!(steps)
-        if (decision is Bid && decision.coincheStatus == CoincheStatus.NONE) require(decision.position == speaker)
+        validateNewBiddingStep(decision, speaker)
+
         steps.add(decision)
+
+        biddingGame = biddingGame.updateCurrentRound(biddingGame.currentRound.copy(biddingSteps = steps.map { it.second }))
+        state.send(GameState(Update.NEW_BIDDING_STEP, biddingGame))
         speaker += 1
     } while (steps.size < 4 || steps.takeLast(3).map { it.second }.any { it != Pass })
-    return steps.dropLast(3).last().second
+
+    return biddingGame
+}
+
+private suspend fun validateNewBiddingStep(
+    decision: Pair<Position, BiddingStep>,
+    speaker: Position
+) {
+    if (decision is Bid && decision.coincheStatus == CoincheStatus.NONE)
+        require(decision.position == speaker)
 }
 
 fun advanceTrick(trick: Trick, trumpSuit: Suit, card: Card): Trick {
