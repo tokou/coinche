@@ -23,7 +23,7 @@ val biddingStrategy = Position.values().associate { position ->
 }
 
 val playingStrategy =  { game: Game -> suspend {
-    findPlayableCards(game.rounds.last().tricks.last(), game.rounds.last().bid.suit).first()
+    findPlayableCards(game.currentTrick, game.currentRound.bid.suit).first()
 } }
 
 suspend fun play() {
@@ -32,59 +32,72 @@ suspend fun play() {
     var game = Game(firstToPlay)
 
     while (game.isNotDone()) {
-        var drawnCards: Map<Position, Player>
-        var tentativeBid: BiddingStep
-        var roundStarter = game.firstToPlay
-        do {
-            drawnCards = drawCards()
-            tentativeBid = doBidding(roundStarter, biddingStrategy)
-            if (tentativeBid == Pass) roundStarter += 1
-            println("Done bidding, tentative bid: $tentativeBid")
-        } while (tentativeBid == Pass)
+        val (freshPlayers, winningBid, roundStarter) = makeBids(game)
 
-        val freshPlayers = drawnCards
-        val winningBid = tentativeBid as Bid
         println("Winning bid : $winningBid")
         println()
 
         val belotePosition = freshPlayers.findBelote(winningBid.suit)
         val round = Round(emptyList(), freshPlayers, roundStarter, winningBid, belotePosition)
-        game = game.copy(rounds = game.rounds + round)
+        game = game.addRound(round)
 
-        while (round.isNotDone()) {
-            val trick = Trick(emptyList(), round.players, round.startingPosition)
-            game = game.copy(rounds = game.rounds.dropLast(1) + round.copy(tricks = round.tricks + trick))
-            while (trick.isNotDone()) {
-                val nextTrick = advanceTrick(trick, round.bid.suit, playingStrategy(game))
-                game = game.copy(rounds = game.rounds.dropLast(1) + round.copy(tricks = round.tricks.dropLast(1) + nextTrick))
-                println(trick)
+        while (game.currentRound.isNotDone()) {
+
+            val trick = Trick(emptyList(), game.currentRound.players, game.currentRound.startingPosition)
+
+            game = game.updateCurrentRound(game.currentRound.addTrick(trick))
+
+            while (game.currentTrick.isNotDone()) {
+                val advancedTrick = advanceTrick(
+                    game.currentTrick, game.currentRound.bid.suit, playingStrategy(game)
+                )
+                game = game.updateCurrentTrick(advancedTrick)
+
+                println(advancedTrick)
             }
-            val winningCard = findWinningCard(trick, round.bid.suit)
-            val winnerPosition = trick.startingPosition + trick.cards.indexOf(winningCard)
-            val isLastTrick = trick.players.areEmptyHanded()
 
-            game = game.copy(rounds = game.rounds.dropLast(1) + round.copy(
-                tricks = round.tricks + trick,
-                players = trick.players,
-                startingPosition = winnerPosition,
-                currentPoints = round.currentPoints + computeTrickPoints(trick, round.bid.suit, winnerPosition, isLastTrick)
-            ))
+            val winningCard = findWinningCard(game.currentTrick, game.currentRound.bid.suit)
+            val winnerPosition = game.currentTrick.startingPosition + game.currentTrick.cards.indexOf(winningCard)
+            val isLastTrick = game.currentTrick.players.areEmptyHanded()
+
+            val trickPoints = computeTrickPoints(game.currentTrick, game.currentRound.bid.suit, winnerPosition, isLastTrick)
+
+            val updatedRound = game.currentRound
+                .updatePlayers(game.currentTrick.players)
+                .updateStartingPosition(winnerPosition)
+                .addPoints(trickPoints)
+            game = game.updateCurrentRound(updatedRound)
+
             println()
-            println("$winnerPosition won the trick! ${round.tricks.size} played. Points: ${round.currentPoints}.")
+            println("$winnerPosition won the trick! ${game.currentRound.tricks.size} played. Points: ${game.currentRound.currentPoints}.")
             println()
         }
-        require(round.currentPoints.first + round.currentPoints.second == 162)
-        game = game.copy(
-            rounds = game.rounds + round,
-            firstToPlay = game.firstToPlay + 1,
-            score = game.score + computeRoundScore(round)
-        )
-        println()
+
+        val roundPoints = game.currentRound.currentPoints
+        require(roundPoints.first + roundPoints.second == 162)
+
+        val roundScore = computeRoundScore(game.currentRound)
+        game = game.addScore(roundScore).changeDealer()
+
         println("Round done. Score is ${game.score}.")
     }
 
     println()
     println("Game Over. Score is ${game.score}.")
+}
+
+private suspend fun makeBids(game: Game): Triple<Map<Position, Player>, Bid, Position> {
+    var drawnCards: Map<Position, Player>
+    var tentativeBid: BiddingStep
+    var biddingStarter = game.firstToPlay
+
+    do {
+        drawnCards = drawCards()
+        tentativeBid = doBidding(biddingStarter, biddingStrategy)
+        if (tentativeBid == Pass) biddingStarter += 1
+    } while (tentativeBid == Pass)
+
+    return Triple(drawnCards, tentativeBid as Bid, biddingStarter)
 }
 
 fun computeRoundScore(round: Round): Score {
@@ -177,10 +190,10 @@ suspend fun advanceTrick(trick: Trick, trumpSuit: Suit, play: suspend () -> Card
     require(validCards.contains(card)) { "Invalid move playing $card. Valid cards are $validCards." }
     val newHand = currentPlayer.hand - card
     val newPlayers = trick.players.mapValues { when (it.key) {
-        currentPosition -> currentPlayer.copy(hand = newHand)
+        currentPosition -> currentPlayer.updateHand(newHand)
         else -> it.value
     } }
-    return trick.copy(cards = trick.cards + card, players = newPlayers)
+    return trick.addCard(card).updatePlayers(newPlayers)
 }
 
 private fun drawCards(): Map<Position, Player> {

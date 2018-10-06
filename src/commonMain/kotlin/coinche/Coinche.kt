@@ -3,6 +3,8 @@ package coinche
 data class Player(
     val hand: Set<Card>
 ) {
+    fun updateHand(hand: Set<Card>): Player = copy(hand = hand)
+
     override fun toString(): String = " P$hand"
 }
 
@@ -30,6 +32,10 @@ data class Trick(
 
     fun isDone(): Boolean = cards.size == players.size
 
+    fun addCard(card: Card): Trick = copy(cards = cards + card)
+
+    fun updatePlayers(players: Map<Position, Player>): Trick = copy(players = players)
+
     override fun toString(): String = "T$cards | ${currentPosition - 1} played ${cards.lastOrNull() ?: ""}"
 }
 
@@ -43,7 +49,20 @@ data class Round(
     val belotePosition: Position?,
     val currentPoints: Score = 0 to 0
 ) {
+    val currentTrick: Trick
+    get() = tricks.last()
+
     fun isDone(): Boolean = players.areEmptyHanded()
+
+    fun addTrick(trick: Trick): Round = copy(tricks = tricks + trick)
+
+    fun updateCurrentTrick(trick: Trick): Round = copy(tricks = tricks.dropLast(1) + trick)
+
+    fun updatePlayers(players: Map<Position, Player>): Round = copy(players = players)
+
+    fun updateStartingPosition(position: Position): Round = copy(startingPosition = position)
+
+    fun addPoints(points: Score): Round = copy(currentPoints = currentPoints + points)
 }
 
 fun Round.isNotDone(): Boolean = !isDone()
@@ -59,7 +78,24 @@ data class Game(
     val score: Score = 0 to 0,
     val winningScore: Int = 1001
 ) {
+    val currentRound: Round
+    get() = rounds.last()
+
+    val currentTrick: Trick
+    get() = currentRound.currentTrick
+
     fun isDone(): Boolean = score.first >= winningScore || score.second >= winningScore
+
+    fun addRound(round: Round): Game = copy(rounds = rounds + round)
+
+    fun updateCurrentRound(round: Round): Game = copy(rounds = rounds.dropLast(1) + round)
+
+    fun addScore(roundScore: Score): Game = copy(score = score + roundScore)
+
+    fun changeDealer(): Game = copy(firstToPlay = firstToPlay + 1)
+
+    fun updateCurrentTrick(trick: Trick): Game =
+        copy(rounds = rounds.dropLast(1) + currentRound.updateCurrentTrick(trick))
 }
 
 fun Game.isNotDone(): Boolean = !isDone()
