@@ -1,7 +1,7 @@
 package coinche
 
 import kotlin.random.Random
-
+import kotlinx.coroutines.channels.SendChannel
 
 fun makeBidForPosition(position: Position): suspend (history: List<Pair<Position, BiddingStep>>) -> BiddingStep =
     { history -> makeBid(position, history) }
@@ -26,34 +26,45 @@ val playingStrategy =  { game: Game -> suspend {
     findPlayableCards(game.currentTrick, game.currentRound.bid.suit).first()
 } }
 
-suspend fun play() {
+enum class Update {
+    NEW_GAME,
+    NEW_ROUND,
+    NEW_TRICK,
+    ADVANCE_TRICK,
+    END_TRICK,
+    END_ROUND,
+    END_GAME
+}
+
+suspend fun play(
+    state: SendChannel<Pair<Update, Game>>
+) {
 
     val firstToPlay = Position.NORTH
     var game = Game(firstToPlay)
+    state.send(Update.NEW_GAME to game)
 
     while (game.isNotDone()) {
         val (freshPlayers, winningBid, roundStarter) = makeBids(game)
 
-        println("Winning bid : $winningBid")
-        println()
-
         val belotePosition = freshPlayers.findBelote(winningBid.suit)
         val round = Round(emptyList(), freshPlayers, roundStarter, winningBid, belotePosition)
         game = game.addRound(round)
+        state.send(Update.NEW_ROUND to game)
 
         while (game.currentRound.isNotDone()) {
 
             val trick = Trick(emptyList(), game.currentRound.players, game.currentRound.startingPosition)
 
             game = game.updateCurrentRound(game.currentRound.addTrick(trick))
+            state.send(Update.NEW_TRICK to game)
 
             while (game.currentTrick.isNotDone()) {
                 val advancedTrick = advanceTrick(
                     game.currentTrick, game.currentRound.bid.suit, playingStrategy(game)
                 )
                 game = game.updateCurrentTrick(advancedTrick)
-
-                println(advancedTrick)
+                state.send(Update.ADVANCE_TRICK to game)
             }
 
             val winningCard = findWinningCard(game.currentTrick, game.currentRound.bid.suit)
@@ -67,10 +78,7 @@ suspend fun play() {
                 .updateStartingPosition(winnerPosition)
                 .addPoints(trickPoints)
             game = game.updateCurrentRound(updatedRound)
-
-            println()
-            println("$winnerPosition won the trick! ${game.currentRound.tricks.size} played. Points: ${game.currentRound.currentPoints}.")
-            println()
+            state.send(Update.END_TRICK to game)
         }
 
         val roundPoints = game.currentRound.currentPoints
@@ -78,12 +86,9 @@ suspend fun play() {
 
         val roundScore = computeRoundScore(game.currentRound)
         game = game.addScore(roundScore).changeDealer()
-
-        println("Round done. Score is ${game.score}.")
+        state.send(Update.END_ROUND to game)
     }
-
-    println()
-    println("Game Over. Score is ${game.score}.")
+    state.send(Update.END_GAME to game)
 }
 
 private suspend fun makeBids(game: Game): Triple<Map<Position, Player>, Bid, Position> {
@@ -174,7 +179,6 @@ private suspend fun doBidding(
     do {
         val decision = speaker to deciders[speaker]!!(steps)
         if (decision is Bid && decision.coincheStatus == CoincheStatus.NONE) require(decision.position == speaker)
-        println("$speaker bids ${decision.second}")
         steps.add(decision)
         speaker += 1
     } while (steps.size < 4 || steps.takeLast(3).map { it.second }.any { it != Pass })
