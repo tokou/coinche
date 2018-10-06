@@ -1,12 +1,14 @@
 package coinche
 
-import kotlin.random.Random
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.launch
+import kotlin.random.Random
 
 fun makeBidForPosition(position: Position): suspend (history: List<Pair<Position, BiddingStep>>) -> BiddingStep =
     { history -> makeBid(position, history) }
 
-suspend fun makeBid(position: Position, history: List<Pair<Position, BiddingStep>>): BiddingStep {
+fun makeBid(position: Position, history: List<Pair<Position, BiddingStep>>): BiddingStep {
     val random = Random.nextInt(16)
     if (random < 8) return Pass
     val highestBid = history.findLast { it.second is Bid }?.second as Bid?
@@ -22,10 +24,6 @@ val biddingStrategy = Position.values().associate { position ->
     position to makeBidForPosition(position)
 }
 
-val playingStrategy =  { game: Game -> suspend {
-    findPlayableCards(game.currentTrick, game.currentRound.bid.suit).first()
-} }
-
 enum class Update {
     NEW_GAME,
     NEW_ROUND,
@@ -36,8 +34,12 @@ enum class Update {
     END_GAME
 }
 
-suspend fun play(
-    state: SendChannel<Pair<Update, Game>>
+fun GameState.shouldPlay(): Boolean =
+    (first == Update.NEW_TRICK || first == Update.ADVANCE_TRICK) && second.currentTrick.isNotDone()
+
+suspend fun startGame(
+    state: SendChannel<GameState>,
+    cards: ReceiveChannel<Card>
 ) {
 
     val firstToPlay = Position.NORTH
@@ -61,7 +63,7 @@ suspend fun play(
 
             while (game.currentTrick.isNotDone()) {
                 val advancedTrick = advanceTrick(
-                    game.currentTrick, game.currentRound.bid.suit, playingStrategy(game)
+                    game.currentTrick, game.currentRound.bid.suit, cards.receive()
                 )
                 game = game.updateCurrentTrick(advancedTrick)
                 state.send(Update.ADVANCE_TRICK to game)
@@ -185,11 +187,10 @@ private suspend fun doBidding(
     return steps.dropLast(3).last().second
 }
 
-suspend fun advanceTrick(trick: Trick, trumpSuit: Suit, play: suspend () -> Card): Trick {
+fun advanceTrick(trick: Trick, trumpSuit: Suit, card: Card): Trick {
     if (trick.isDone()) return trick
     val currentPlayer = trick.currentPlayer!! // Contract
     val currentPosition = trick.startingPosition + trick.cards.size
-    val card = play()
     val validCards = findPlayableCards(trick, trumpSuit)
     require(validCards.contains(card)) { "Invalid move playing $card. Valid cards are $validCards." }
     val newHand = currentPlayer.hand - card
