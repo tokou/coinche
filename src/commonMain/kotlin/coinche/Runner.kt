@@ -2,7 +2,6 @@ package coinche
 
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
-import kotlinx.coroutines.launch
 import kotlin.random.Random
 
 fun makeBidForPosition(position: Position): suspend (history: List<Pair<Position, BiddingStep>>) -> BiddingStep =
@@ -41,56 +40,81 @@ suspend fun startGame(
     state: SendChannel<GameState>,
     cards: ReceiveChannel<Card>
 ) {
-
     val firstToPlay = Position.NORTH
     var game = Game(firstToPlay)
     state.send(Update.NEW_GAME to game)
 
     while (game.isNotDone()) {
-        val (freshPlayers, winningBid, roundStarter) = makeBids(game)
-
-        val belotePosition = freshPlayers.findBelote(winningBid.suit)
-        val round = Round(emptyList(), freshPlayers, roundStarter, winningBid, belotePosition)
-        game = game.addRound(round)
-        state.send(Update.NEW_ROUND to game)
-
-        while (game.currentRound.isNotDone()) {
-
-            val trick = Trick(emptyList(), game.currentRound.players, game.currentRound.startingPosition)
-
-            game = game.updateCurrentRound(game.currentRound.addTrick(trick))
-            state.send(Update.NEW_TRICK to game)
-
-            while (game.currentTrick.isNotDone()) {
-                val advancedTrick = advanceTrick(
-                    game.currentTrick, game.currentRound.bid.suit, cards.receive()
-                )
-                game = game.updateCurrentTrick(advancedTrick)
-                state.send(Update.ADVANCE_TRICK to game)
-            }
-
-            val winningCard = findWinningCard(game.currentTrick, game.currentRound.bid.suit)
-            val winnerPosition = game.currentTrick.startingPosition + game.currentTrick.cards.indexOf(winningCard)
-            val isLastTrick = game.currentTrick.players.areEmptyHanded()
-
-            val trickPoints = computeTrickPoints(game.currentTrick, game.currentRound.bid.suit, winnerPosition, isLastTrick)
-
-            val updatedRound = game.currentRound
-                .updatePlayers(game.currentTrick.players)
-                .updateStartingPosition(winnerPosition)
-                .addPoints(trickPoints)
-            game = game.updateCurrentRound(updatedRound)
-            state.send(Update.END_TRICK to game)
-        }
-
-        val roundPoints = game.currentRound.currentPoints
-        require(roundPoints.first + roundPoints.second == 162)
-
-        val roundScore = computeRoundScore(game.currentRound)
-        game = game.addScore(roundScore).changeDealer()
-        state.send(Update.END_ROUND to game)
+        game = playGame(game, state, cards)
     }
     state.send(Update.END_GAME to game)
+}
+
+private suspend fun playGame(
+    initializedGame: Game,
+    state: SendChannel<GameState>,
+    cards: ReceiveChannel<Card>
+): Game {
+    val (freshPlayers, winningBid, roundStarter) = makeBids(initializedGame)
+
+    val belotePosition = freshPlayers.findBelote(winningBid.suit)
+    val round = Round(emptyList(), freshPlayers, roundStarter, winningBid, belotePosition)
+    var game = initializedGame.addRound(round)
+    state.send(Update.NEW_ROUND to game)
+
+    while (game.currentRound.isNotDone()) {
+        game = playRound(game, state, cards)
+    }
+
+    val roundPoints = game.currentRound.currentPoints
+    require(roundPoints.first + roundPoints.second == 162)
+
+    val roundScore = computeRoundScore(game.currentRound)
+    game = game.addScore(roundScore).changeDealer()
+    state.send(Update.END_ROUND to game)
+    return game
+}
+
+private suspend fun playRound(
+    undoneRoundGame: Game,
+    state: SendChannel<GameState>,
+    cards: ReceiveChannel<Card>
+): Game {
+    var game = undoneRoundGame
+    val trick = Trick(emptyList(), game.currentRound.players, game.currentRound.startingPosition)
+
+    game = game.updateCurrentRound(game.currentRound.addTrick(trick))
+    state.send(Update.NEW_TRICK to game)
+
+    while (game.currentTrick.isNotDone()) {
+        val advancedTrick = advanceTrick(
+            game.currentTrick, game.currentRound.bid.suit, cards.receive()
+        )
+        game = game.updateCurrentTrick(advancedTrick)
+        state.send(Update.ADVANCE_TRICK to game)
+    }
+
+    return updateGameAfterTrickIsDone(game, state)
+}
+
+private suspend fun updateGameAfterTrickIsDone(
+    game: Game,
+    state: SendChannel<GameState>
+): Game {
+    val winningCard = findWinningCard(game.currentTrick, game.currentRound.bid.suit)
+    val winnerPosition = game.currentTrick.startingPosition + game.currentTrick.cards.indexOf(winningCard)
+    val isLastTrick = game.currentTrick.players.areEmptyHanded()
+
+    val trickPoints =
+        computeTrickPoints(game.currentTrick, game.currentRound.bid.suit, winnerPosition, isLastTrick)
+
+    val updatedRound = game.currentRound
+        .updatePlayers(game.currentTrick.players)
+        .updateStartingPosition(winnerPosition)
+        .addPoints(trickPoints)
+    val updatedGame = game.updateCurrentRound(updatedRound)
+    state.send(Update.END_TRICK to updatedGame)
+    return updatedGame
 }
 
 private suspend fun makeBids(game: Game): Triple<Map<Position, Player>, Bid, Position> {
