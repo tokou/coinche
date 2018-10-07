@@ -21,3 +21,4 @@ pluginManagement {
 }
 rootProject.name = 'coinche'
 
+enableFeaturePreview('GRADLE_METADATA')

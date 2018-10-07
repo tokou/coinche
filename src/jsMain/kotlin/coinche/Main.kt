@@ -4,8 +4,8 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlin.browser.window
 
-fun start() {
-    GlobalScope.launch { runGame() }
+fun start() = GlobalScope.launch {
+    runGame()
 }
 
 actual fun inputCard(playableCards: Set<Card>): Card {

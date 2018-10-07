@@ -1,7 +1,14 @@
 package coinche
 
+import kotlinx.coroutines.runBlocking
+
+fun main(args: Array<String>) = runBlocking {
+    runGame()
+}
+
 actual fun inputCard(playableCards: Set<Card>): Card {
-    return playableCards.first()
+    println("Select card to play: $playableCards")
+    return readLine()!!.cards().first()
 }
 
 actual fun showGameState(state: GameState) {
