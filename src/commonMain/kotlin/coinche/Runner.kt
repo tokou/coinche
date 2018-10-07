@@ -1,30 +1,13 @@
 package coinche
 
+
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
-import kotlin.random.Random
 
-fun makeBidForPosition(position: Position): suspend (history: List<Pair<Position, BiddingStep>>) -> BiddingStep =
-    { history -> makeBid(position, history) }
-
-fun makeBid(position: Position, history: List<Pair<Position, BiddingStep>>): BiddingStep {
-    val random = Random.nextInt(16)
-    if (random < 8) return Pass
-    val highestBid = history.findLast { it.second is Bid }?.second as Bid?
-    val contract = Bid.Contract(position, Suit.values()[Random.nextInt(Suit.values().size)], random * 10)
-    if (highestBid == null) return contract
-    return when (highestBid) {
-        is Bid.Contract -> if (random * 10 > highestBid.contract) contract else Pass
-        else -> Pass
-    }
-}
-
-val biddingStrategy = Position.values().associate { position ->
-    position to makeBidForPosition(position)
-}
 
 enum class Update {
     NEW_GAME,
+    NEW_BIDDING,
     NEW_BIDDING_STEP,
     END_BIDDING,
     NEW_ROUND,
@@ -38,16 +21,20 @@ enum class Update {
 fun GameState.shouldPlay(): Boolean =
     (first == Update.NEW_TRICK || first == Update.ADVANCE_TRICK) && second.currentTrick.isNotDone()
 
+fun GameState.shouldBid(): Boolean =
+    (first == Update.NEW_BIDDING_STEP || first == Update.NEW_BIDDING) && shouldContinueBidding(second.currentRound.biddingSteps)
+
 suspend fun startGame(
     state: SendChannel<GameState>,
-    cards: ReceiveChannel<Card>
+    cards: ReceiveChannel<Card>,
+    bids: ReceiveChannel<BiddingStep>
 ) {
     val firstToPlay = Position.NORTH
     var game = Game(firstToPlay)
     state.send(Update.NEW_GAME to game)
 
     while (game.isNotDone()) {
-        game = playGame(game, state, cards)
+        game = playGame(game, state, cards, bids)
     }
     state.send(Update.END_GAME to game)
 }
@@ -55,12 +42,14 @@ suspend fun startGame(
 private suspend fun playGame(
     initializedGame: Game,
     state: SendChannel<GameState>,
-    cards: ReceiveChannel<Card>
+    cards: ReceiveChannel<Card>,
+    bids: ReceiveChannel<BiddingStep>
 ): Game {
     val round = Round(emptyList(), drawCards(), initializedGame.firstToPlay, emptyList(), belotePosition = null)
     var game = initializedGame.addRound(round)
 
-    game = makeBids(game, state)
+    state.send(Update.NEW_BIDDING to game)
+    game = makeBids(game, state, bids)
     if (game.currentRound.isDone()) {
         state.send(Update.END_ROUND to game)
         return game
@@ -83,9 +72,12 @@ private suspend fun playGame(
     return game
 }
 
-private suspend fun makeBids(game: Game, state: SendChannel<GameState>): Game {
-    val deciders = Position.values().associate { it to makeBidForPosition(it) }
-    val biddedGame = doBidding(game, deciders, state)
+private suspend fun makeBids(
+    game: Game,
+    state: SendChannel<GameState>,
+    bids: ReceiveChannel<BiddingStep>
+): Game {
+    val biddedGame = doBidding(game, state, bids)
     state.send(GameState(Update.END_BIDDING, biddedGame))
     return biddedGame
 }
@@ -136,10 +128,12 @@ fun computeRoundScore(round: Round): Score {
     // Missing : other scoring rules (like point done + contract, steal belote)
     require(round.isDone())
     val bid = round.bid
-    val belotePoints = round.belotePosition?.let { when (it) {
-        Position.NORTH, Position.SOUTH -> 20 to 0
-        Position.EAST, Position.WEST -> 0 to 20
-    } } ?: 0 to 0
+    val belotePoints = round.belotePosition?.let {
+        when (it) {
+            Position.NORTH, Position.SOUTH -> 20 to 0
+            Position.EAST, Position.WEST -> 0 to 20
+        }
+    } ?: 0 to 0
     val points = round.currentPoints + belotePoints
     val attackerPoints = when (bid.position) {
         Position.NORTH, Position.SOUTH -> points.first
@@ -200,28 +194,32 @@ fun findWinningCard(trick: Trick, trumpSuit: Suit): Card {
 
 private suspend fun doBidding(
     game: Game,
-    deciders: Map<Position, suspend (decisions: List<Pair<Position, BiddingStep>>) -> BiddingStep>,
-    state: SendChannel<GameState>
+    state: SendChannel<GameState>,
+    bids: ReceiveChannel<BiddingStep>
 ): Game {
     var biddingGame = game
     val steps = mutableListOf<Pair<Position, BiddingStep>>()
     var speaker = biddingGame.firstToPlay
 
     do {
-        val decision = speaker to deciders[speaker]!!(steps)
+        val decision = speaker to bids.receive()
         validateNewBiddingStep(decision, speaker)
 
         steps.add(decision)
 
-        biddingGame = biddingGame.updateCurrentRound(biddingGame.currentRound.copy(biddingSteps = steps.map { it.second }))
+        biddingGame =
+                biddingGame.updateCurrentRound(biddingGame.currentRound.copy(biddingSteps = steps.map { it.second }))
         state.send(GameState(Update.NEW_BIDDING_STEP, biddingGame))
         speaker += 1
-    } while (steps.size < 4 || steps.takeLast(3).map { it.second }.any { it != Pass })
+    } while (shouldContinueBidding(steps.map { it.second }))
 
     return biddingGame
 }
 
-private suspend fun validateNewBiddingStep(
+private fun shouldContinueBidding(steps: List<BiddingStep>) =
+    steps.size < 4 || steps.takeLast(3).any { it != Pass }
+
+private fun validateNewBiddingStep(
     decision: Pair<Position, BiddingStep>,
     speaker: Position
 ) {
@@ -236,10 +234,12 @@ fun advanceTrick(trick: Trick, trumpSuit: Suit, card: Card): Trick {
     val validCards = findPlayableCards(trick, trumpSuit)
     require(validCards.contains(card)) { "Invalid move playing $card. Valid cards are $validCards." }
     val newHand = currentPlayer.hand - card
-    val newPlayers = trick.players.mapValues { when (it.key) {
-        currentPosition -> currentPlayer.updateHand(newHand)
-        else -> it.value
-    } }
+    val newPlayers = trick.players.mapValues {
+        when (it.key) {
+            currentPosition -> currentPlayer.updateHand(newHand)
+            else -> it.value
+        }
+    }
     return trick.addCard(card).updatePlayers(newPlayers)
 }
 
