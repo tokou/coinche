@@ -8,7 +8,9 @@ enum class CoincheStatus {
 
 sealed class BiddingStep
 
-object Pass : BiddingStep()
+object Pass : BiddingStep() {
+    override fun toString(): String = "Pass"
+}
 
 sealed class Bid(val coincheStatus: CoincheStatus = CoincheStatus.NONE) : BiddingStep() {
     abstract val suit: Suit
