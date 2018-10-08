@@ -45,14 +45,16 @@ data class Round(
     val tricks: List<Trick>,
     val players: Map<Position, Player>,
     val startingPosition: Position,
-    val bid: Bid,
+    val biddingSteps: List<BiddingStep>,
     val belotePosition: Position?,
     val currentPoints: Score = 0 to 0
 ) {
     val currentTrick: Trick
-    get() = tricks.last()
+        get() = tricks.last()
+    val bid: Bid
+        get() = biddingSteps.last { it is Bid } as Bid
 
-    fun isDone(): Boolean = players.areEmptyHanded()
+    fun isDone(): Boolean = biddingSteps.all { it == Pass } || players.areEmptyHanded()
 
     fun addTrick(trick: Trick): Round = copy(tricks = tricks + trick)
 
