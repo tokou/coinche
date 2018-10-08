@@ -1,0 +1,87 @@
+import java.awt.Desktop
+
+task("linkJs") {
+    dependsOn "compileKotlinJs"
+
+    doLast {
+        def main = kotlin.targets.js.compilations.main
+        main.runtimeDependencyFiles.filter {
+            it.name.endsWith(".jar")
+        }.each { File file ->
+            copy {
+                includeEmptyDirs = false
+                from(zipTree(file.absolutePath))
+                into main.output.classesDir.absolutePath + "/lib"
+                include { fileTreeElement ->
+                    def path = fileTreeElement.path
+                    def isJsFile = path.endsWith(".js")
+                    def isResource = path.startsWith("META-INF/resources/")
+                    def isMeta = path.startsWith("META-INF/")
+                    isJsFile && (isResource || !isMeta)
+                }
+            }
+        }
+    }
+}
+
+task("linkTestJs") {
+    dependsOn "compileTestKotlinJs"
+
+    doLast {
+        def test = kotlin.targets.js.compilations.test
+        test.runtimeDependencyFiles.filter {
+            it.name.endsWith(".jar")
+        }.each { File file ->
+            copy {
+                includeEmptyDirs = false
+                from(zipTree(file.absolutePath))
+                into test.output.classesDir.absolutePath + "/lib"
+                include { fileTreeElement ->
+                    def path = fileTreeElement.path
+                    def isJsFile = path.endsWith(".js")
+                    def isResource = path.startsWith("META-INF/resources/")
+                    def isMeta = path.startsWith("META-INF/")
+                    isJsFile && (isResource || !isMeta)
+                }
+            }
+        }
+    }
+}
+
+jsMainClasses.dependsOn("linkJs")
+jsTestClasses.dependsOn("linkTestJs")
+
+jsTest.doLast {
+    Desktop.getDesktop().open(new File("src/jsTest/test.html"))
+}
+
+task("runJs") {
+    dependsOn "jsMainClasses"
+    doLast {
+        Desktop.getDesktop().open(new File("src/jsMain/index.html"))
+    }
+}
+
+task("runJvm") {
+    dependsOn "jvmMainClasses"
+    doLast { javaexec {
+        standardInput = System.in
+        def jvmMain = kotlin.targets.jvm.compilations.main
+        classpath = jvmMain.output.classesDirs
+        jvmMain.runtimeDependencyFiles.filter {
+            it.name.endsWith(".jar")
+        }.each {
+            classpath += files(it)
+        }
+        main = 'coinche.MainKt'
+    } }
+}
+
+task("runMacos") {
+    dependsOn "linkReleaseExecutableMacos"
+    doLast { exec {
+        standardInput = System.in
+        def binary = kotlin.targets.macos.compilations.main.getBinary('EXECUTABLE', 'RELEASE')
+        commandLine binary
+    } }
+}

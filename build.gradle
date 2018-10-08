@@ -60,3 +60,5 @@ kotlin {
         macosTest {}
     }
 }
+
+apply from: 'helpers.gradle'
