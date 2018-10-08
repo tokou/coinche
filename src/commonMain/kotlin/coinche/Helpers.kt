@@ -5,7 +5,7 @@ import coinche.Suit.*
 
 fun String.cards(): List<Card> = split(' ')
     .map { it.dropLast(1) to it.last().toString() }
-    .map { parseRank(it.first) to parseColor(it.second) }
+    .map { parseRank(it.first) to parseSuit(it.second) }
     .map { (rank, suit) -> Card(rank = rank, suit = suit) }
 
 fun parseRank(str: String) = when (str) {
@@ -20,7 +20,7 @@ fun parseRank(str: String) = when (str) {
     else -> throw RuntimeException("Unknown card rank")
 }
 
-fun parseColor(str: String) = when (str) {
+fun parseSuit(str: String) = when (str) {
     "♣", "C", "c" -> CLUB
     "♠", "S", "s" -> SPADE
     "♦", "D", "d" -> DIAMOND
@@ -28,10 +28,7 @@ fun parseColor(str: String) = when (str) {
     else -> throw RuntimeException("Unknown card color")
 }
 
-fun createPlayer(cards: List<Card> = "7♣ 8♣ 9♣ 10♣ J♣ 7♦".cards()): Player = Player(cards.toSet())
-
-fun createTrick(cards: List<Card>, currentPlayer: Player): Trick = Trick(
-    cards = cards,
-    players = mapOf(Position.values()[cards.size] to currentPlayer),
-    startingPosition = Position.NORTH
-)
+fun String.bid(position: Position): BiddingStep = when (this) {
+    "pass", "p", "" -> Pass
+    else -> Bid.Contract(position, parseSuit(takeLast(1)), dropLast(1).toInt())
+}

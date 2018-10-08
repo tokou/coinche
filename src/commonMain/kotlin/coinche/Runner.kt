@@ -22,7 +22,8 @@ fun GameState.shouldPlay(): Boolean =
     (first == Update.NEW_TRICK || first == Update.ADVANCE_TRICK) && second.currentTrick.isNotDone()
 
 fun GameState.shouldBid(): Boolean =
-    (first == Update.NEW_BIDDING_STEP || first == Update.NEW_BIDDING) && shouldContinueBidding(second.currentRound.biddingSteps)
+    (first == Update.NEW_BIDDING_STEP || first == Update.NEW_BIDDING) &&
+        shouldContinueBidding(second.currentRound.biddingSteps.map { it.second })
 
 suspend fun startGame(
     state: SendChannel<GameState>,
@@ -48,6 +49,8 @@ private suspend fun playGame(
     val round = Round(emptyList(), drawCards(), initializedGame.firstToPlay, emptyList(), belotePosition = null)
     var game = initializedGame.addRound(round)
 
+    state.send(Update.NEW_ROUND to game)
+
     state.send(Update.NEW_BIDDING to game)
     game = makeBids(game, state, bids)
     if (game.currentRound.isDone()) {
@@ -57,7 +60,6 @@ private suspend fun playGame(
 
     val belotePosition = game.currentRound.players.findBelote(game.currentRound.bid.suit)
     game.updateCurrentRound(round.copy(belotePosition = belotePosition))
-    state.send(Update.NEW_ROUND to game)
 
     while (game.currentRound.isNotDone()) {
         game = playRound(game, state, cards)
@@ -208,7 +210,7 @@ private suspend fun doBidding(
         steps.add(decision)
 
         biddingGame =
-                biddingGame.updateCurrentRound(biddingGame.currentRound.copy(biddingSteps = steps.map { it.second }))
+            biddingGame.updateCurrentRound(biddingGame.currentRound.copy(biddingSteps = steps))
         state.send(GameState(Update.NEW_BIDDING_STEP, biddingGame))
         speaker += 1
     } while (shouldContinueBidding(steps.map { it.second }))
