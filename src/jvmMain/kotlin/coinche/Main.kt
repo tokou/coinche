@@ -16,6 +16,7 @@ actual fun showGameState(state: GameState) {
             println("Game starting.")
             println()
         }
+        Update.NEW_BIDDING -> {}
         Update.NEW_BIDDING_STEP -> {
             println("New bidding step: ${game.currentRound.biddingSteps.last()}")
             println()

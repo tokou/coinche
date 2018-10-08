@@ -44,5 +44,14 @@ actual fun showGameState(state: GameState) {
         Update.END_GAME -> {
             println("Game over.")
         }
+        Update.NEW_BIDDING -> {}
+        Update.NEW_BIDDING_STEP -> {
+            println("New bidding step: ${game.currentRound.biddingSteps.last()}")
+            println()
+        }
+        Update.END_BIDDING -> {
+            println("End of biddings: ${game.currentRound.biddingSteps}")
+            println()
+        }
     }
 }
