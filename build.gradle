@@ -67,4 +67,8 @@ kotlin {
     }
 }
 
+tasks.withType(Test) {
+    testLogging.events = ["passed", "skipped", "failed"]
+}
+
 apply from: 'helpers.gradle'
