@@ -26,7 +26,7 @@ kotlin {
         commonMain {
             dependencies {
                 implementation 'org.jetbrains.kotlin:kotlin-stdlib-common'
-                implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core-common:0.30.1-eap13'
+                implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core-common:0.30.2-eap13'
             }
         }
         commonTest {
@@ -38,7 +38,7 @@ kotlin {
         jvmMain {
             dependencies {
                 implementation 'org.jetbrains.kotlin:kotlin-stdlib-jdk8'
-                implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:0.30.1-eap13'
+                implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:0.30.2-eap13'
             }
         }
         jvmTest {
@@ -50,7 +50,7 @@ kotlin {
         jsMain {
             dependencies {
                 implementation 'org.jetbrains.kotlin:kotlin-stdlib-js'
-                implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core-js:0.30.1-eap13'
+                implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core-js:0.30.2-eap13'
             }
         }
         jsTest {
@@ -60,7 +60,7 @@ kotlin {
         }
         macosMain {
             dependencies {
-                implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core-native:0.30.1-eap13'
+                implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core-native:0.30.2-eap13'
             }
         }
         macosTest {}
