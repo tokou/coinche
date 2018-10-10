@@ -15,6 +15,12 @@ kotlin {
             compilations.main.outputKinds('EXECUTABLE')
             compilations.main.entryPoint = 'coinche.main'
         }
+
+        configure([jvm, js, macos]) {
+            compilations.main.kotlinSourceSets.each {
+                it.languageSettings.progressiveMode = true
+            }
+        }
     }
     sourceSets {
         commonMain {
