@@ -14,6 +14,7 @@ actual class HumanStrategy actual constructor(private val position: Position) : 
         val prompt = history.joinToString(separator = "\n", postfix = "\n") { (pos, bid) ->
             "$pos bid $bid"
         } + "Make bid:"
+
         return window.prompt(prompt)!!.bid(position)
     }
 
